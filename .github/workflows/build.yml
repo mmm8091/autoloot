@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          lfs: true
       
       - name: Extract version from tag
         id: version
@@ -34,6 +36,13 @@ jobs:
           }
           Write-Host "is_prerelease=$isPrerelease" >> $env:GITHUB_OUTPUT
       
+      - name: Checkout Git LFS files
+        run: |
+          Write-Host "Checking Git LFS installation..."
+          git lfs version
+          Write-Host "Pulling LFS files..."
+          git lfs pull
+      
       - name: Setup AutoHotkey v2 compiler from repository
         run: |
           # 使用代码库中的 AutoHotkey（已通过 Git LFS 下载）
@@ -46,6 +55,25 @@ jobs:
           
           Write-Host "Using AutoHotkey from repository: $ahkRepoPath"
           
+          # 验证 Git LFS 文件是否正确下载
+          Write-Host "Verifying LFS files..."
+          Get-ChildItem -Path $ahkRepoPath -Recurse -Filter "*.exe" | ForEach-Object {
+            $file = $_
+            $size = (Get-Item $file.FullName).Length
+            Write-Host "  $($file.Name): $size bytes"
+            
+            # 检查文件大小（LFS 指针文件通常很小，约 130 字节）
+            if ($size -lt 1024) {
+              Write-Warning "  WARNING: $($file.Name) is very small ($size bytes), might be LFS pointer file!"
+              Write-Host "  Attempting to pull LFS file..."
+              git lfs pull --include="$($file.FullName)"
+              
+              # 再次检查大小
+              $newSize = (Get-Item $file.FullName).Length
+              Write-Host "  After pull: $newSize bytes"
+            }
+          }
+          
           # 查找编译器（Ahk2Exe.exe 或 Aut2Exe.exe，可能在 Compiler 子目录中）
           $compilerPath = "$ahkRepoPath\Compiler"
           $ahk2ExePath = "$compilerPath\Ahk2Exe.exe"
@@ -56,9 +84,47 @@ jobs:
           if (Test-Path $ahk2ExePath) {
             $foundCompiler = $ahk2ExePath
             Write-Host "Compiler found at: $compilerPath (Ahk2Exe.exe)"
+            
+            # 验证文件大小和完整性
+            $fileSize = (Get-Item $foundCompiler).Length
+            Write-Host "Compiler file size: $fileSize bytes"
+            
+            # 如果文件太小，可能是 LFS 指针文件，需要重新拉取
+            if ($fileSize -lt 1024) {
+              Write-Warning "Compiler file is too small, pulling from LFS..."
+              git lfs pull --include="$foundCompiler" --exclude=""
+              $fileSize = (Get-Item $foundCompiler).Length
+              Write-Host "After LFS pull, file size: $fileSize bytes"
+            }
+            
+            # 验证文件头（检查是否为 PE 可执行文件 - MZ header）
+            try {
+              $fileStream = [System.IO.File]::OpenRead($foundCompiler)
+              $bytes = New-Object byte[] 2
+              $fileStream.Read($bytes, 0, 2) | Out-Null
+              $fileStream.Close()
+              
+              $isPE = ($bytes[0] -eq 0x4D -and $bytes[1] -eq 0x5A)  # 'MZ' = 0x4D 0x5A
+              if (-not $isPE) {
+                Write-Error "Compiler file does not appear to be a valid Windows executable!"
+                Write-Host "File header: 0x$($bytes[0].ToString('X2')) 0x$($bytes[1].ToString('X2'))"
+                Write-Host "Expected: 0x4D 0x5A (MZ header)"
+                exit 1
+              }
+              Write-Host "Compiler file validation: OK (valid PE executable with MZ header)"
+            } catch {
+              Write-Warning "Could not validate compiler file header: $_"
+            }
+            
           } elseif (Test-Path $aut2ExePath) {
             $foundCompiler = $aut2ExePath
             Write-Host "Compiler found at: $compilerPath (Aut2Exe.exe)"
+            
+            # 验证文件
+            $fileSize = (Get-Item $foundCompiler).Length
+            if ($fileSize -lt 1024) {
+              git lfs pull --include="$foundCompiler"
+            }
           }
           
           if ($foundCompiler) {
