@@ -392,15 +392,39 @@ jobs:
       
       - name: Generate checksum
         run: |
-          $exePath = "${{ github.workspace }}\$env:OUTPUT_EXE"
-          $checksumPath = "${{ github.workspace }}\$env:OUTPUT_EXE.sha256"
+          # 从环境变量或默认值获取输出文件名
+          $outputFileName = $env:OUTPUT_EXE
+          if (-not $outputFileName) {
+            # 如果没有设置，根据是否是 tag 构建来确定
+            if ("${{ steps.version.outputs.version }}" -ne "") {
+              $outputFileName = "autoloot-v${{ steps.version.outputs.version }}.exe"
+            } else {
+              $outputFileName = "autoloot.exe"
+            }
+            Write-Host "OUTPUT_EXE not set, using default: $outputFileName"
+          }
           
-          Write-Host "Generating SHA256 checksum..."
+          $exePath = "${{ github.workspace }}\$outputFileName"
+          
+          # 验证文件是否存在
+          if (-not (Test-Path $exePath)) {
+            Write-Error "Executable file not found: $exePath"
+            Write-Host "Searching for exe files in workspace..."
+            Get-ChildItem -Path "${{ github.workspace }}" -Filter "*.exe" | ForEach-Object {
+              Write-Host "Found: $($_.FullName)"
+            }
+            exit 1
+          }
+          
+          $checksumPath = "${{ github.workspace }}\$outputFileName.sha256"
+          
+          Write-Host "Generating SHA256 checksum for: $exePath"
           $hash = Get-FileHash -Path $exePath -Algorithm SHA256
-          $checksum = "$($hash.Hash)  $env:OUTPUT_EXE"
+          $checksum = "$($hash.Hash)  $outputFileName"
           Set-Content -Path $checksumPath -Value $checksum
           
-          Write-Host "Checksum: $checksum"
+          Write-Host "Checksum generated: $checksum"
+          Write-Host "OUTPUT_EXE=$outputFileName" >> $env:GITHUB_ENV
       
       - name: Create GitHub Release (tag only)
         if: startsWith(github.ref, 'refs/tags/v')
