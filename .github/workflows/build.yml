@@ -311,35 +311,82 @@ jobs:
             $binFile = Get-ChildItem -Path $ahkBinPath -Recurse -Filter "*.bin" | Select-Object -First 1
           }
           
+          # 准备编译参数
+          $compileArgs = @()
+          $compileArgs += "/in"
+          $compileArgs += "`"$scriptPath`""
+          $compileArgs += "/out"
+          $compileArgs += "`"$outputPath`""
+          
           if ($binFile) {
             Write-Host "Using bin file: $($binFile.FullName)"
-          }
-          
-          # 使用编译器编译（64位）
-          # /in: 输入脚本文件
-          # /out: 输出 exe 文件
-          # /bin: 指定 bin 文件路径（64位）
-          Write-Host "Compiling script to exe..."
-          
-          if ($binFile) {
-            & $compilerExe /in "$scriptPath" /out "$outputPath" /bin "$($binFile.FullName)"
+            $compileArgs += "/bin"
+            $compileArgs += "`"$($binFile.FullName)`""
           } else {
-            # 如果不指定 bin，使用默认（通常是64位）
-            # 需要指定 AutoHotkey 64位 exe 作为 base
+            # 如果不指定 bin，使用 AutoHotkey 64位 exe 作为 base
             $ahk64Exe = "$ahkBinPath\AutoHotkey64.exe"
             if (Test-Path $ahk64Exe) {
-              & $compilerExe /in "$scriptPath" /out "$outputPath" /bin "$ahk64Exe"
+              Write-Host "Using AutoHotkey64.exe as base: $ahk64Exe"
+              $compileArgs += "/bin"
+              $compileArgs += "`"$ahk64Exe`""
             } else {
-              & $compilerExe /in "$scriptPath" /out "$outputPath"
+              Write-Warning "No base file found, compiler will use default"
             }
           }
           
+          # 使用编译器编译（64位）
+          Write-Host "Compiling script to exe..."
+          Write-Host "Command: $compilerExe $($compileArgs -join ' ')"
+          
+          # 执行编译命令并捕获输出
+          try {
+            $process = Start-Process -FilePath $compilerExe -ArgumentList $compileArgs -Wait -PassThru -NoNewWindow -RedirectStandardOutput "$env:TEMP\compiler_output.txt" -RedirectStandardError "$env:TEMP\compiler_error.txt"
+            
+            # 读取输出
+            if (Test-Path "$env:TEMP\compiler_output.txt") {
+              $output = Get-Content "$env:TEMP\compiler_output.txt" -Raw
+              if ($output) {
+                Write-Host "Compiler output:"
+                Write-Host $output
+              }
+            }
+            
+            if (Test-Path "$env:TEMP\compiler_error.txt") {
+              $error = Get-Content "$env:TEMP\compiler_error.txt" -Raw
+              if ($error) {
+                Write-Host "Compiler errors:"
+                Write-Host $error
+              }
+            }
+            
+            Write-Host "Compiler exit code: $($process.ExitCode)"
+            
+            if ($process.ExitCode -ne 0) {
+              Write-Error "Compiler exited with code: $($process.ExitCode)"
+            }
+          } catch {
+            Write-Error "Failed to execute compiler: $_"
+            exit 1
+          }
+          
+          # 等待一下确保文件写入完成
+          Start-Sleep -Seconds 2
+          
+          # 验证输出文件是否存在
           if (Test-Path $outputPath) {
             $fileSize = (Get-Item $outputPath).Length
             Write-Host "Build successful! File size: $([math]::Round($fileSize / 1KB, 2)) KB"
             Write-Host "OUTPUT_EXE=$outputName.exe" >> $env:GITHUB_ENV
           } else {
-            Write-Error "Build failed! Output file not found."
+            Write-Error "Build failed! Output file not found at: $outputPath"
+            Write-Host "Checking for output files in workspace..."
+            Get-ChildItem -Path "${{ github.workspace }}" -Filter "*.exe" -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "Found: $($_.FullName) ($([math]::Round($_.Length / 1KB, 2)) KB)"
+            }
+            Write-Host "Checking script directory..."
+            Get-ChildItem -Path (Split-Path $scriptPath) -Filter "*.exe" -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "Found: $($_.FullName) ($([math]::Round($_.Length / 1KB, 2)) KB)"
+            }
             exit 1
           }
       
