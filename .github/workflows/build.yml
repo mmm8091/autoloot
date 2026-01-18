@@ -253,15 +253,26 @@ jobs:
           $scriptPath = "${{ github.workspace }}\autoloot.ahk"
           $outputName = "autoloot"
           
+          # 获取版本号（从步骤输出）
+          $version = "${{ steps.version.outputs.version }}"
+          $isTagRef = "${{ github.ref }}"
+          
+          Write-Host "Git ref: $isTagRef"
+          Write-Host "Version from step: '$version'"
+          
           # 如果是 tag 发布，使用版本号命名
-          if ("${{ steps.version.outputs.version }}" -ne "") {
-            $outputName = "autoloot-v${{ steps.version.outputs.version }}"
-            Write-Host "Building release version: $outputName.exe"
+          if ($isTagRef -like "refs/tags/v*" -and $version -ne "") {
+            $outputName = "autoloot-v$version"
+            Write-Host "Building release version: $outputName.exe (version: $version)"
           } else {
             Write-Host "Building development version: $outputName.exe"
+            if ($version -ne "") {
+              Write-Host "Note: Version '$version' detected but ref is '$isTagRef'"
+            }
           }
           
           $outputPath = "${{ github.workspace }}\$outputName.exe"
+          Write-Host "Output file will be: $outputPath"
           
           # 检查环境变量是否设置
           Write-Host "COMPILER_PATH environment variable: $env:COMPILER_PATH"
@@ -460,7 +471,7 @@ jobs:
             autoloot-v${{ steps.version.outputs.version }}.exe.sha256
           token: ${{ secrets.GITHUB_TOKEN }}
           draft: false
-          fail_on_unmatched_files: false
+          fail_on_unmatched_files: true
       
       - name: Upload artifact (manual build)
         if: github.event_name == 'workflow_dispatch'
