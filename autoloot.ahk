@@ -18,34 +18,49 @@ global GlobalPaused := true  ; 默认启动时为暂停状态
 global ActiveKeys := Map()   ; 内存中的按键状态表
 
 ; ==============================================================================
-; 🖥️ OSD 屏幕显示初始化 (修复布局版)
+; 🖥️ OSD 屏幕显示初始化 (重构版)
 ; ==============================================================================
-global MyOSD := Gui("+AlwaysOnTop -Caption +ToolWindow +Owner")
-MyOSD.BackColor := "1F1F1F"
-MyOSD.SetFont("s10", "Microsoft YaHei UI")
-WinSetTransparent(210, MyOSD)
+InitOSD() {
+    global MyOSD, OSDHeader, OSDContent
+    
+    ; 创建 GUI 窗口
+    MyOSD := Gui("+AlwaysOnTop -Caption +ToolWindow +Owner")
+    MyOSD.BackColor := "1F1F1F"
+    WinSetTransparent(210, MyOSD)
+    
+    ; 设置默认字体
+    MyOSD.SetFont("s10", "Microsoft YaHei UI")
+    
+    ; 1. 标题 (居中，加粗)
+    MyOSD.SetFont("s11 w700")
+    OSDHeader := MyOSD.Add("Text", "w240 Center vHeader", "初始化...")
+    
+    ; 2. 分割线
+    MyOSD.Add("Text", "h2 w240 0x10")
+    
+    ; 3. 内容区域 - 使用 Edit 控件支持多行显示
+    MyOSD.SetFont("s10 w400", "Consolas")
+    OSDContent := MyOSD.Add("Edit", "w240 r10 ReadOnly -VScroll -HScroll vContent cWhite Background1F1F1F")
+    ; ReadOnly: 只读
+    ; r10: 初始10行，后续会动态调整
+    ; -VScroll -HScroll: 禁用滚动条（让窗口自动扩展）
+    ; Background1F1F1F: 设置背景色与窗口一致
+    
+    ; 允许鼠标拖动窗口
+    OnMessage(0x0201, WM_LBUTTONDOWN)
+    
+    ; 显示窗口
+    MyOSD.Show("NoActivate x50 y50 AutoSize")
+}
 
-; 1. 标题 (居中，加粗)
-MyOSD.SetFont("s11 w700")
-global OSDHeader := MyOSD.Add("Text", "w220 Center vHeader", "初始化...")
-
-; 2. 分割线
-MyOSD.Add("Text", "h2 w230 0x10") ; 稍微宽一点以填满
-
-; 3. 详细列表 (关键修改：改为 Left 左对齐，去掉预设高度)
-; 使用 Consolas 字体确保数字对齐
-MyOSD.SetFont("s10 w400", "Consolas")
-; 注意：这里不设高度，留给后面 UpdateOSD 自动控制
-global OSDContent := MyOSD.Add("Text", "w220 Left vContent cWhite y+5 x15", "")
-
-; 允许鼠标拖动窗口
-OnMessage(0x0201, WM_LBUTTONDOWN)
-
-MyOSD.Show("NoActivate x50 y50 AutoSize")
+; 初始化 OSD
+InitOSD()
 ; ==============================================================================
 ; 🚀 启动加载逻辑
 ; ==============================================================================
+global ConfigFileTime := 0  ; 记录配置文件最后修改时间
 LoadConfig() ; 读取配置文件
+StartConfigMonitor() ; 启动配置文件监控
 
 ; ==============================================================================
 ; 🎮 热键注册
@@ -97,9 +112,21 @@ ToggleGlobalPause(*) {
     global GlobalPaused := !GlobalPaused
     
     if (GlobalPaused) {
-        SoundBeep(500, 150) ; 🔕 暂停音效 (低)
+        ; 🔕 暂停音效：低音三连音（更复杂的声音）
+        SoundBeep(400, 100)
+        Sleep(50)
+        SoundBeep(350, 100)
+        Sleep(50)
+        SoundBeep(300, 150)
     } else {
-        SoundBeep(1500, 150) ; 🔔 启动音效 (高)
+        ; 🔔 启动音效：高音上升音阶（更复杂的声音）
+        SoundBeep(800, 80)
+        Sleep(40)
+        SoundBeep(1000, 80)
+        Sleep(40)
+        SoundBeep(1200, 80)
+        Sleep(40)
+        SoundBeep(1500, 120)
         ; 恢复时，立即重置所有定时器，防止堆积
         for key, state in ActiveKeys {
              SetTimer(state.Timer, -10)
@@ -228,45 +255,127 @@ AdjustSpeed(amount, *) {
 }
 
 ; ==============================================================================
-; 💾 读写配置相关
+; 💾 读写配置相关 (重构版)
 ; ==============================================================================
 
 LoadConfig() {
+    global ConfigFileTime
+    
+    ; 检查文件是否存在
+    if !FileExist(IniFileName) {
+        UpdateOSD()
+        return
+    }
+    
+    ; 获取文件修改时间
     try {
-        ; 读取 Ini 文件中的 [ActiveKeys] 章节
-        activeSection := IniRead(IniFileName, "ActiveKeys", "")
+        fileTime := FileGetTime(IniFileName, "M")
+        ConfigFileTime := fileTime
+    } catch {
+        ; 如果获取时间失败，继续执行
+    }
+    
+    ; 先停止所有现有的按键
+    keysToStop := []
+    for key in ActiveKeys {
+        keysToStop.Push(key)
+    }
+    for key in keysToStop {
+        StopKey(key)
+    }
+    
+    ; 读取配置文件
+    try {
+        ; 读取整个 [ActiveKeys] 章节
+        activeSection := IniRead(IniFileName, "ActiveKeys")
         
-        if (activeSection = "")
+        if (activeSection = "" || activeSection = "ERROR") {
+            UpdateOSD()
             return
+        }
 
         ; 解析每一行 (格式: key=interval)
-        Loop Parse, activeSection, "`n", "`r" 
-        {
-            if (A_LoopField = "")
+        lines := StrSplit(activeSection, "`n", "`r")
+        for line in lines {
+            line := Trim(line)
+            if (line = "")
                 continue
+            
+            ; 分割键值对
+            pos := InStr(line, "=")
+            if (pos <= 0)
+                continue
+            
+            key := Trim(SubStr(line, 1, pos - 1))
+            intervalStr := Trim(SubStr(line, pos + 1))
+            
+            ; 验证并添加
+            if (key != "" && intervalStr != "") {
+                key := StrLower(key)  ; 转换为小写
+                interval := Integer(intervalStr)
                 
-            parts := StrSplit(A_LoopField, "=")
-            if (parts.Length = 2) {
-                key := parts[1]
-                interval := parts[2]
-                AddKey(key, interval)
+                if (interval > 0) {
+                    AddKey(key, interval)
+                }
             }
         }
+    } catch as err {
+        ; 如果读取失败，不影响现有配置
+        ; 可以在这里添加错误日志
     }
+    
     UpdateOSD()
 }
 
+/**
+ * 启动配置文件监控（定期检查文件变化）
+ */
+StartConfigMonitor() {
+    ; 每500毫秒检查一次配置文件是否被修改
+    SetTimer(CheckConfigFile, 500)
+}
+
+/**
+ * 检查配置文件是否有变化
+ */
+CheckConfigFile() {
+    global ConfigFileTime
+    
+    if !FileExist(IniFileName)
+        return
+    
+    try {
+        fileTime := FileGetTime(IniFileName, "M")
+        ; 如果文件被修改了，重新加载配置
+        if (fileTime != ConfigFileTime) {
+            LoadConfig()
+        }
+    }
+}
+
 SaveKeyConfig(key, interval) {
-    IniWrite interval, IniFileName, "ActiveKeys", key
+    try {
+        ; 确保键名是小写
+        key := StrLower(key)
+        ; 写入配置
+        IniWrite interval, IniFileName, "ActiveKeys", key
+        ; 更新文件修改时间记录，避免立即触发重载
+        global ConfigFileTime
+        try {
+            ConfigFileTime := FileGetTime(IniFileName, "M")
+        }
+    } catch {
+        ; 保存失败时不影响程序运行
+    }
 }
 
 ; ==============================================================================
-; 🖥️ OSD 更新逻辑 (强制刷新高度)
+; 🖥️ OSD 更新逻辑 (重构版)
 ; ==============================================================================
 UpdateOSD() {
     activeCount := ActiveKeys.Count
 
-    ; --- 1. 标题颜色与状态 ---
+    ; --- 1. 更新标题 ---
     if (GlobalPaused) {
         OSDHeader.SetFont("cFFAA00")
         OSDHeader.Value := "⏸ PAUSED (" . activeCount . "键)"
@@ -284,32 +393,52 @@ UpdateOSD() {
         keyListStr := "等待热键激活...`n(Ctrl+Alt+Shift+Key)"
         OSDContent.SetFont("cGray")
     } else {
-        ; 遍历所有按键
+        ; 遍历所有按键，构建显示字符串
         for key, state in ActiveKeys {
             uKey := StrUpper(key)
             
-            ; 简单的对齐填充
+            ; 对齐填充（确保键名对齐）
             padding := ""
-            if (StrLen(uKey) < 2)
+            keyLen := StrLen(uKey)
+            if (keyLen == 1)
                 padding := "  "
-            else if (StrLen(uKey) < 4)
+            else if (keyLen == 2)
                 padding := " "
             
-            ; 【关键点】这里必须是 .= (点加等号) 才是追加，如果是 := 就会覆盖
-            keyListStr .= Format("{1}{2} ➜ {3,4} ms`n", uKey, padding, state.BaseDelay)
+            ; 格式化延迟值（4位数字，右对齐）
+            delayValue := Integer(state.BaseDelay)
+            delayStr := String(delayValue)
+            ; 补空格到4位
+            while (StrLen(delayStr) < 4)
+                delayStr := " " . delayStr
+            
+            ; 追加到字符串（使用 .= 确保追加而不是覆盖）
+            ; 使用 `n 作为换行符（Edit 控件支持）
+            keyListStr .= uKey . padding . " ➜ " . delayStr . " ms`n"
         }
-        ; 去掉末尾多余换行
+        ; 去掉末尾的换行符
         keyListStr := RTrim(keyListStr, "`n")
         OSDContent.SetFont("cWhite")
     }
 
-    ; --- 3. 赋值与强制重绘 (修复显示不全的问题) ---
+    ; --- 3. 更新内容并调整窗口大小 ---
     OSDContent.Value := keyListStr
     
-    ; 【核心修复】告诉文本控件：保持宽度220，高度自动适应内容(空字符串代表自动)
-    OSDContent.Move(,, 220)
+    ; 根据行数动态设置 Edit 控件的高度
+    lineCount := activeCount > 0 ? activeCount : 2
+    ; 每行大约 20 像素，最小 1 行
+    if (lineCount < 1)
+        lineCount := 1
+    if (lineCount > 20)
+        lineCount := 20  ; 限制最大行数
     
-    ; 最后调整整个窗口大小以适应新的控件高度
+    ; 计算所需高度（每行约20像素 + 一些边距）
+    height := lineCount * 20 + 6
+    
+    ; 设置 Edit 控件的宽度和高度
+    OSDContent.Move(, , 240, height)
+    
+    ; 重新显示窗口以应用 AutoSize
     MyOSD.Show("AutoSize NoActivate")
 }
 ; ==============================================================================
