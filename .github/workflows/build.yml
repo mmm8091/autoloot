@@ -498,6 +498,12 @@ jobs:
           }
           
           Write-Host "✓ Files verified successfully: $exeFile and $shaFile"
+          
+          # 将文件名保存到环境变量供 Release 步骤使用
+          Write-Host "RELEASE_EXE_FILE=$exeFile" >> $env:GITHUB_ENV
+          Write-Host "RELEASE_SHA_FILE=$shaFile" >> $env:GITHUB_ENV
+          Write-Host "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+          Write-Host "Files to upload: $exeFile, $shaFile"
       
       - name: Create GitHub Release (tag only)
         if: startsWith(github.ref, 'refs/tags/v')
@@ -526,9 +532,8 @@ jobs:
             - 🎛️ Real-time speed adjustment
             - 🖥️ On-screen display
             - 💾 Configuration persistence
-          files: |
-            autoloot-v${{ steps.prepare_release.outputs.version }}.exe
-            autoloot-v${{ steps.prepare_release.outputs.version }}.exe.sha256
+          files: ${{ env.RELEASE_EXE_FILE }}
+            ${{ env.RELEASE_SHA_FILE }}
           token: ${{ secrets.GITHUB_TOKEN }}
           draft: false
           fail_on_unmatched_files: true
