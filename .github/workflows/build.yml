@@ -505,24 +505,34 @@ jobs:
           Write-Host "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
           Write-Host "Files to upload: $exeFile, $shaFile"
       
+      - name: Extract version for Release step
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: release_version
+        run: |
+          # 从 tag 提取版本号（去掉 v 前缀）
+          $tagName = "${{ github.ref_name }}"
+          $version = $tagName -replace '^v', ''
+          Write-Host "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Extracted version for release: $version"
+      
       - name: Create GitHub Release (tag only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
-          name: Release ${{ steps.prepare_release.outputs.version }}
+          name: Release ${{ steps.release_version.outputs.version }}
           prerelease: ${{ steps.prepare_release.outputs.is_prerelease == 'true' }}
           body: |
-            ## AutoLoot ${{ steps.prepare_release.outputs.version }}
+            ## AutoLoot ${{ steps.release_version.outputs.version }}
             
             ${{ steps.prepare_release.outputs.is_prerelease == 'true' && '⚠️ **This is a prerelease version**' || '' }}
             
             ### Downloads
-            - **[autoloot-v${{ steps.prepare_release.outputs.version }}.exe](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/autoloot-v${{ steps.prepare_release.outputs.version }}.exe)**
-            - [SHA256 Checksum](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/autoloot-v${{ steps.prepare_release.outputs.version }}.exe.sha256)
+            - **[autoloot-v${{ steps.release_version.outputs.version }}.exe](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/autoloot-v${{ steps.release_version.outputs.version }}.exe)**
+            - [SHA256 Checksum](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/autoloot-v${{ steps.release_version.outputs.version }}.exe.sha256)
             
             ### Installation
-            1. Download the `autoloot-v${{ steps.prepare_release.outputs.version }}.exe` file
+            1. Download the `autoloot-v${{ steps.release_version.outputs.version }}.exe` file
             2. Run it directly (no installation required)
             3. Configure keys using `Ctrl+Alt+Shift+Key`
             
@@ -533,8 +543,8 @@ jobs:
             - 🖥️ On-screen display
             - 💾 Configuration persistence
           files: |
-            autoloot-v${{ steps.prepare_release.outputs.version }}.exe
-            autoloot-v${{ steps.prepare_release.outputs.version }}.exe.sha256
+            autoloot-v${{ steps.release_version.outputs.version }}.exe
+            autoloot-v${{ steps.release_version.outputs.version }}.exe.sha256
           token: ${{ secrets.GITHUB_TOKEN }}
           draft: false
           fail_on_unmatched_files: true
