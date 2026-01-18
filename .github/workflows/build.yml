@@ -441,11 +441,11 @@ jobs:
             ${{ steps.version.outputs.is_prerelease == 'true' && '⚠️ **This is a prerelease version**' || '' }}
             
             ### Downloads
-            - **[autoloot-${{ steps.version.outputs.version }}.exe](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/autoloot-${{ steps.version.outputs.version }}.exe)**
-            - [SHA256 Checksum](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/autoloot-${{ steps.version.outputs.version }}.exe.sha256)
+            - **[autoloot-v${{ steps.version.outputs.version }}.exe](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/autoloot-v${{ steps.version.outputs.version }}.exe)**
+            - [SHA256 Checksum](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/autoloot-v${{ steps.version.outputs.version }}.exe.sha256)
             
             ### Installation
-            1. Download the `autoloot-${{ steps.version.outputs.version }}.exe` file
+            1. Download the `autoloot-v${{ steps.version.outputs.version }}.exe` file
             2. Run it directly (no installation required)
             3. Configure keys using `Ctrl+Alt+Shift+Key`
             
