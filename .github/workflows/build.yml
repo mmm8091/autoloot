@@ -18,8 +18,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          lfs: true
       
       - name: Extract version from tag
         id: version
@@ -38,215 +36,53 @@ jobs:
           }
           Add-Content -Path $env:GITHUB_OUTPUT -Value "is_prerelease=$isPrerelease"
       
-      - name: Checkout Git LFS files
+      - name: Setup AutoHotkey & Ahk2Exe (download)
         run: |
-          Write-Host "Checking Git LFS installation..."
-          git lfs version
-          Write-Host "Pulling LFS files..."
-          git lfs pull
-      
-      - name: Setup AutoHotkey v2 compiler from repository
-        run: |
-          # 使用代码库中的 AutoHotkey（已通过 Git LFS 下载）
-          $ahkRepoPath = "${{ github.workspace }}\AutoHotkey_2.0.19"
-          
-          if (-not (Test-Path $ahkRepoPath)) {
-            Write-Error "AutoHotkey_2.0.19 directory not found in repository!"
+          $ahkVersion = "2.0.19"
+          $toolsRoot = Join-Path $env:RUNNER_TEMP "autoloot-tools"
+          New-Item -ItemType Directory -Force -Path $toolsRoot | Out-Null
+
+          # --- AutoHotkey ---
+          $ahkZip = Join-Path $toolsRoot "AutoHotkey_$ahkVersion.zip"
+          $ahkUrl = "https://github.com/AutoHotkey/AutoHotkey/releases/download/v$ahkVersion/AutoHotkey_$ahkVersion.zip"
+          Write-Host "Downloading AutoHotkey v$ahkVersion: $ahkUrl"
+          Invoke-WebRequest -Uri $ahkUrl -OutFile $ahkZip -ErrorAction Stop
+
+          $ahkExtract = Join-Path $toolsRoot "AutoHotkey_$ahkVersion"
+          if (Test-Path $ahkExtract) { Remove-Item -Recurse -Force $ahkExtract }
+          Expand-Archive -Path $ahkZip -DestinationPath $ahkExtract -Force
+
+          $ahk64Exe = Get-ChildItem -Path $ahkExtract -Recurse -Filter "AutoHotkey64.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $ahk64Exe) {
+            Write-Error "AutoHotkey64.exe not found after extracting AutoHotkey_$ahkVersion.zip"
+            Get-ChildItem -Path $ahkExtract -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 50 FullName | ForEach-Object { Write-Host "  $_" }
             exit 1
           }
-          
-          Write-Host "Using AutoHotkey from repository: $ahkRepoPath"
-          
-          # 验证 Git LFS 文件是否正确下载
-          Write-Host "Verifying LFS files..."
-          Get-ChildItem -Path $ahkRepoPath -Recurse -Filter "*.exe" | ForEach-Object {
-            $file = $_
-            $size = (Get-Item $file.FullName).Length
-            Write-Host "  $($file.Name): $size bytes"
-            
-            # 检查文件大小（LFS 指针文件通常很小，约 130 字节）
-            if ($size -lt 1024) {
-              Write-Warning "  WARNING: $($file.Name) is very small ($size bytes), might be LFS pointer file!"
-              Write-Host "  Attempting to pull LFS file..."
-              git lfs pull --include="$($file.FullName)"
-              
-              # 再次检查大小
-              $newSize = (Get-Item $file.FullName).Length
-              Write-Host "  After pull: $newSize bytes"
-            }
+
+          $ahkDir = Split-Path $ahk64Exe.FullName -Parent
+          Add-Content -Path $env:GITHUB_ENV -Value "AHK_DIR=$ahkDir"
+          Write-Host "AHK_DIR=$ahkDir"
+
+          # --- Ahk2Exe ---
+          $ahk2ExeZip = Join-Path $toolsRoot "Ahk2Exe.zip"
+          $ahk2ExeUrl = "https://github.com/AutoHotkey/Ahk2Exe/releases/download/v$ahkVersion/Ahk2Exe.zip"
+          Write-Host "Downloading Ahk2Exe: $ahk2ExeUrl"
+          Invoke-WebRequest -Uri $ahk2ExeUrl -OutFile $ahk2ExeZip -ErrorAction Stop
+
+          $compilerExtract = Join-Path $toolsRoot "Ahk2Exe"
+          if (Test-Path $compilerExtract) { Remove-Item -Recurse -Force $compilerExtract }
+          Expand-Archive -Path $ahk2ExeZip -DestinationPath $compilerExtract -Force
+
+          $compilerExe = Get-ChildItem -Path $compilerExtract -Recurse -Include "Ahk2Exe.exe","Aut2Exe.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $compilerExe) {
+            Write-Error "Ahk2Exe.exe/Aut2Exe.exe not found after extracting Ahk2Exe.zip"
+            Get-ChildItem -Path $compilerExtract -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 50 FullName | ForEach-Object { Write-Host "  $_" }
+            exit 1
           }
-          
-          # 查找编译器（Ahk2Exe.exe 或 Aut2Exe.exe，可能在 Compiler 子目录中）
-          $compilerPath = "$ahkRepoPath\Compiler"
-          $ahk2ExePath = "$compilerPath\Ahk2Exe.exe"
-          $aut2ExePath = "$compilerPath\Aut2Exe.exe"
-          
-          # 检查编译器是否已存在于仓库中（优先查找 Ahk2Exe.exe，然后是 Aut2Exe.exe）
-          $foundCompiler = $null
-          if (Test-Path $ahk2ExePath) {
-            $foundCompiler = $ahk2ExePath
-            Write-Host "Compiler found at: $compilerPath (Ahk2Exe.exe)"
-            
-            # 验证文件大小和完整性
-            $fileSize = (Get-Item $foundCompiler).Length
-            Write-Host "Compiler file size: $fileSize bytes"
-            
-            # 如果文件太小，可能是 LFS 指针文件，需要重新拉取
-            if ($fileSize -lt 1024) {
-              Write-Warning "Compiler file is too small, pulling from LFS..."
-              git lfs pull --include="$foundCompiler" --exclude=""
-              $fileSize = (Get-Item $foundCompiler).Length
-              Write-Host "After LFS pull, file size: $fileSize bytes"
-            }
-            
-            # 验证文件头（检查是否为 PE 可执行文件 - MZ header）
-            try {
-              $fileStream = [System.IO.File]::OpenRead($foundCompiler)
-              $bytes = New-Object byte[] 2
-              $fileStream.Read($bytes, 0, 2) | Out-Null
-              $fileStream.Close()
-              
-              $isPE = ($bytes[0] -eq 0x4D -and $bytes[1] -eq 0x5A)  # 'MZ' = 0x4D 0x5A
-              if (-not $isPE) {
-                Write-Error "Compiler file does not appear to be a valid Windows executable!"
-                Write-Host "File header: 0x$($bytes[0].ToString('X2')) 0x$($bytes[1].ToString('X2'))"
-                Write-Host "Expected: 0x4D 0x5A (MZ header)"
-                exit 1
-              }
-              Write-Host "Compiler file validation: OK (valid PE executable with MZ header)"
-            } catch {
-              Write-Warning "Could not validate compiler file header: $_"
-            }
-            
-          } elseif (Test-Path $aut2ExePath) {
-            $foundCompiler = $aut2ExePath
-            Write-Host "Compiler found at: $compilerPath (Aut2Exe.exe)"
-            
-            # 验证文件
-            $fileSize = (Get-Item $foundCompiler).Length
-            if ($fileSize -lt 1024) {
-              git lfs pull --include="$foundCompiler"
-            }
-          }
-          
-          if ($foundCompiler) {
-            Add-Content -Path $env:GITHUB_ENV -Value "COMPILER_PATH=$compilerPath"
-            Add-Content -Path $env:GITHUB_ENV -Value "COMPILER_EXE=$foundCompiler"
-            Write-Host "Compiler setup complete: COMPILER_PATH=$compilerPath"
-          } else {
-            # 如果找不到，从 GitHub 下载编译器
-            Write-Host "Compiler not found in repository, downloading from GitHub..."
-            
-            # 创建 Compiler 目录
-            if (-not (Test-Path $compilerPath)) {
-              New-Item -ItemType Directory -Path $compilerPath -Force | Out-Null
-            }
-            
-            # 尝试从 Ahk2Exe 仓库获取最新 release 的 asset
-            try {
-              Write-Host "Fetching latest Ahk2Exe release from GitHub API..."
-              $latestRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/AutoHotkey/Ahk2Exe/releases/latest" -ErrorAction Stop
-              
-              # 查找 ZIP 或压缩包 asset
-              $compilerAsset = $latestRelease.assets | Where-Object { 
-                $_.name -like "*.zip" -or $_.name -like "*Ahk2Exe*" 
-              } | Select-Object -First 1
-              
-              if ($compilerAsset) {
-                $compilerUrl = $compilerAsset.browser_download_url
-                Write-Host "Found compiler asset: $($compilerAsset.name)"
-              } else {
-                throw "No ZIP asset found in latest release"
-              }
-            } catch {
-              # 如果 API 失败，尝试使用固定的下载链接（从 v2.0.19 对应的版本）
-              Write-Host "Failed to fetch from API, using fallback URL..."
-              $compilerUrl = "https://github.com/AutoHotkey/Ahk2Exe/releases/download/v2.0.19/Ahk2Exe.zip"
-            }
-            
-            $compilerZip = "$env:TEMP\Ahk2Exe.zip"
-            
-            Write-Host "Downloading compiler from: $compilerUrl"
-            try {
-              Invoke-WebRequest -Uri $compilerUrl -OutFile $compilerZip -ErrorAction Stop
-            } catch {
-              Write-Error "Failed to download compiler: $_"
-              Write-Host "Trying alternative: downloading from AutoHotkey release..."
-              
-              # 备用方案：从 AutoHotkey 主仓库下载完整版本（可能包含编译器）
-              $ahkRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/AutoHotkey/AutoHotkey/releases/tags/v2.0.19"
-              $ahkZipAsset = $ahkRelease.assets | Where-Object { $_.name -like "AutoHotkey_2.0.19.zip" } | Select-Object -First 1
-              
-              if ($ahkZipAsset) {
-                $fallbackZip = "$env:TEMP\AutoHotkey_Full.zip"
-                Write-Host "Downloading full AutoHotkey package: $($ahkZipAsset.browser_download_url)"
-                Invoke-WebRequest -Uri $ahkZipAsset.browser_download_url -OutFile $fallbackZip
-                
-                # 解压并查找编译器
-                $tempExtract = "$env:TEMP\AutoHotkey_Extract"
-                Expand-Archive -Path $fallbackZip -DestinationPath $tempExtract -Force
-                
-                # 查找 Aut2Exe.exe（尝试多种可能的文件名）
-                $foundCompiler = $null
-                $possibleNames = @("Aut2Exe.exe", "Ahk2Exe.exe", "Aut2Exe64.exe", "Ahk2Exe64.exe")
-                
-                foreach ($name in $possibleNames) {
-                  $foundCompiler = Get-ChildItem -Path $tempExtract -Recurse -Filter $name -ErrorAction SilentlyContinue | Select-Object -First 1
-                  if ($foundCompiler) {
-                    Write-Host "Found compiler in AutoHotkey package: $($foundCompiler.FullName)"
-                    break
-                  }
-                }
-                
-                if ($foundCompiler) {
-                  Copy-Item -Path $foundCompiler.FullName -Destination $aut2ExePath -Force
-                  Write-Host "Compiler extracted successfully"
-                  Add-Content -Path $env:GITHUB_ENV -Value "COMPILER_PATH=$compilerPath"
-                  exit 0
-                } else {
-                  Write-Host "Listing all .exe files in AutoHotkey package:"
-                  Get-ChildItem -Path $tempExtract -Recurse -Filter "*.exe" | Select-Object FullName | ForEach-Object { Write-Host "  $($_.FullName)" }
-                  throw "Aut2Exe.exe not found in AutoHotkey package"
-                }
-              } else {
-                throw "Cannot find compiler download URL"
-              }
-            }
-            
-            Write-Host "Extracting compiler..."
-            Expand-Archive -Path $compilerZip -DestinationPath $compilerPath -Force
-            
-            # 列出解压后的所有文件（调试信息）
-            Write-Host "Listing all extracted files:"
-            Get-ChildItem -Path $compilerPath -Recurse | Select-Object FullName, Name | ForEach-Object { 
-              Write-Host "  $($_.FullName)"
-            }
-            
-            # 查找 Aut2Exe.exe（尝试多种可能的文件名）
-            $foundCompiler = $null
-            $possibleNames = @("Aut2Exe.exe", "Ahk2Exe.exe", "Aut2Exe64.exe", "Ahk2Exe64.exe")
-            
-            foreach ($name in $possibleNames) {
-              $foundCompiler = Get-ChildItem -Path $compilerPath -Recurse -Filter $name -ErrorAction SilentlyContinue | Select-Object -First 1
-              if ($foundCompiler) {
-                Write-Host "Found compiler: $($foundCompiler.FullName)"
-                break
-              }
-            }
-            
-            if ($foundCompiler) {
-              $compilerPath = $foundCompiler.DirectoryName
-              $aut2ExePath = $foundCompiler.FullName
-              Write-Host "Compiler found at: $compilerPath"
-              Add-Content -Path $env:GITHUB_ENV -Value "COMPILER_PATH=$compilerPath"
-            } else {
-              Write-Error "Failed to find Aut2Exe.exe after download!"
-              Write-Host "Searched for: $($possibleNames -join ', ')"
-              Write-Host "Listing all .exe files in compiler directory:"
-              Get-ChildItem -Path $compilerPath -Recurse -Filter "*.exe" | Select-Object FullName | ForEach-Object { Write-Host "  $($_.FullName)" }
-              exit 1
-            }
-          }
+
+          Add-Content -Path $env:GITHUB_ENV -Value "COMPILER_PATH=$($compilerExe.DirectoryName)"
+          Add-Content -Path $env:GITHUB_ENV -Value "COMPILER_EXE=$($compilerExe.FullName)"
+          Write-Host "COMPILER_EXE=$($compilerExe.FullName)"
       
       - name: Compile script to exe (64-bit)
         run: |
@@ -292,14 +128,8 @@ jobs:
               $compilerExe = "$env:COMPILER_PATH\Aut2Exe.exe"
             }
           } else {
-            # 如果都没有设置，尝试从仓库中查找
-            $ahkRepoPath = "${{ github.workspace }}\AutoHotkey_2.0.19"
-            $compilerPath = "$ahkRepoPath\Compiler"
-            $compilerExe = "$compilerPath\Ahk2Exe.exe"
-            if (-not (Test-Path $compilerExe)) {
-              $compilerExe = "$compilerPath\Aut2Exe.exe"
-            }
-            Write-Host "Trying to find compiler in repository: $compilerExe"
+            Write-Error "Compiler environment variables not set (COMPILER_EXE/COMPILER_PATH)."
+            exit 1
           }
           
           if (-not (Test-Path $compilerExe)) {
@@ -308,18 +138,17 @@ jobs:
             Write-Host "  COMPILER_EXE: $env:COMPILER_EXE"
             Write-Host "  COMPILER_PATH\Ahk2Exe.exe: $env:COMPILER_PATH\Ahk2Exe.exe"
             Write-Host "  COMPILER_PATH\Aut2Exe.exe: $env:COMPILER_PATH\Aut2Exe.exe"
-            Write-Host "Checking repository for compiler..."
-            $ahkRepoPath = "${{ github.workspace }}\AutoHotkey_2.0.19"
-            Get-ChildItem -Path "$ahkRepoPath\Compiler" -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue | ForEach-Object {
-              Write-Host "  Found: $($_.FullName)"
-            }
             exit 1
           }
           
           Write-Host "Using compiler: $compilerExe"
           
           # 查找 AutoHotkey 64位 bin 文件（用于编译）
-          $ahkBinPath = "${{ github.workspace }}\AutoHotkey_2.0.19"
+          $ahkBinPath = $env:AHK_DIR
+          if (-not $ahkBinPath) {
+            Write-Error "AHK_DIR environment variable not set."
+            exit 1
+          }
           $binFile = Get-ChildItem -Path $ahkBinPath -Recurse -Filter "AutoHotkey*.bin" | Where-Object { $_.Name -like "*64*" -or $_.Name -like "*U64*" } | Select-Object -First 1
           
           if (-not $binFile) {
