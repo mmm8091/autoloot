@@ -3,6 +3,18 @@
 SendMode "Event"  ; 【关键】使用 Event 模式以支持按键时长模拟
 SetWorkingDir A_ScriptDir
 
+; 需要管理员权限（与提升权限运行的程序交互时更稳定）
+if (!A_IsAdmin) {
+    try {
+        if (A_IsCompiled) {
+            Run '*RunAs "' A_ScriptFullPath '"'
+        } else {
+            Run '*RunAs "' A_AhkPath '" "' A_ScriptFullPath '"'
+        }
+    }
+    ExitApp
+}
+
 ; ==============================================================================
 ; ⚙️ 全局配置 (可在此调整参数)
 ; ==============================================================================
