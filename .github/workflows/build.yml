@@ -27,7 +27,7 @@ jobs:
         run: |
           $tag = "${{ github.ref }}"
           $version = $tag -replace 'refs/tags/v', ''
-          Write-Host "version=$version" >> $env:GITHUB_OUTPUT
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$version"
           Write-Host "Extracted version: $version"
           
           # 检测是否为预发布版本（alpha, beta, rc 等）
@@ -36,7 +36,7 @@ jobs:
             $isPrerelease = "true"
             Write-Host "This is a prerelease version"
           }
-          Write-Host "is_prerelease=$isPrerelease" >> $env:GITHUB_OUTPUT
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "is_prerelease=$isPrerelease"
       
       - name: Checkout Git LFS files
         run: |
@@ -130,8 +130,8 @@ jobs:
           }
           
           if ($foundCompiler) {
-            Write-Host "COMPILER_PATH=$compilerPath" >> $env:GITHUB_ENV
-            Write-Host "COMPILER_EXE=$foundCompiler" >> $env:GITHUB_ENV
+            Add-Content -Path $env:GITHUB_ENV -Value "COMPILER_PATH=$compilerPath"
+            Add-Content -Path $env:GITHUB_ENV -Value "COMPILER_EXE=$foundCompiler"
             Write-Host "Compiler setup complete: COMPILER_PATH=$compilerPath"
           } else {
             # 如果找不到，从 GitHub 下载编译器
@@ -201,7 +201,7 @@ jobs:
                 if ($foundCompiler) {
                   Copy-Item -Path $foundCompiler.FullName -Destination $aut2ExePath -Force
                   Write-Host "Compiler extracted successfully"
-                  Write-Host "COMPILER_PATH=$compilerPath" >> $env:GITHUB_ENV
+                  Add-Content -Path $env:GITHUB_ENV -Value "COMPILER_PATH=$compilerPath"
                   exit 0
                 } else {
                   Write-Host "Listing all .exe files in AutoHotkey package:"
@@ -238,7 +238,7 @@ jobs:
               $compilerPath = $foundCompiler.DirectoryName
               $aut2ExePath = $foundCompiler.FullName
               Write-Host "Compiler found at: $compilerPath"
-              Write-Host "COMPILER_PATH=$compilerPath" >> $env:GITHUB_ENV
+              Add-Content -Path $env:GITHUB_ENV -Value "COMPILER_PATH=$compilerPath"
             } else {
               Write-Error "Failed to find Aut2Exe.exe after download!"
               Write-Host "Searched for: $($possibleNames -join ', ')"
@@ -392,7 +392,7 @@ jobs:
           if (Test-Path $outputPath) {
             $fileSize = (Get-Item $outputPath).Length
             Write-Host "Build successful! File size: $([math]::Round($fileSize / 1KB, 2)) KB"
-            Write-Host "OUTPUT_EXE=$outputName.exe" >> $env:GITHUB_ENV
+            Add-Content -Path $env:GITHUB_ENV -Value "OUTPUT_EXE=$outputName.exe"
           } else {
             Write-Error "Build failed! Output file not found at: $outputPath"
             Write-Host "Checking for output files in workspace..."
@@ -449,7 +449,7 @@ jobs:
           Set-Content -Path $checksumPath -Value $checksum
           
           Write-Host "Checksum generated: $checksum"
-          Write-Host "OUTPUT_EXE=$outputFileName" >> $env:GITHUB_ENV
+          Add-Content -Path $env:GITHUB_ENV -Value "OUTPUT_EXE=$outputFileName"
       
       - name: Prepare Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -459,7 +459,7 @@ jobs:
           $tagName = "${{ github.ref_name }}"
           $version = $tagName -replace '^v', ''
           Write-Host "Release version: $version"
-          Write-Host "version=$version" >> $env:GITHUB_OUTPUT
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$version"
           
           # 检测是否为预发布版本
           $isPrerelease = "false"
@@ -467,7 +467,7 @@ jobs:
             $isPrerelease = "true"
             Write-Host "This is a prerelease version"
           }
-          Write-Host "is_prerelease=$isPrerelease" >> $env:GITHUB_OUTPUT
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "is_prerelease=$isPrerelease"
           
           # 检查文件是否存在
           $exeFile = "autoloot-v$version.exe"
@@ -500,9 +500,9 @@ jobs:
           Write-Host "✓ Files verified successfully: $exeFile and $shaFile"
           
           # 将文件名保存到环境变量供 Release 步骤使用
-          Write-Host "RELEASE_EXE_FILE=$exeFile" >> $env:GITHUB_ENV
-          Write-Host "RELEASE_SHA_FILE=$shaFile" >> $env:GITHUB_ENV
-          Write-Host "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+          Add-Content -Path $env:GITHUB_ENV -Value "RELEASE_EXE_FILE=$exeFile"
+          Add-Content -Path $env:GITHUB_ENV -Value "RELEASE_SHA_FILE=$shaFile"
+          Add-Content -Path $env:GITHUB_ENV -Value "RELEASE_VERSION=$version"
           Write-Host "Files to upload: $exeFile, $shaFile"
       
       - name: Create GitHub Release (tag only)
@@ -518,11 +518,11 @@ jobs:
             ${{ steps.prepare_release.outputs.is_prerelease == 'true' && '⚠️ **This is a prerelease version**' || '' }}
             
             ### Downloads
-            - **[autoloot-v${{ env.RELEASE_VERSION }}.exe](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/autoloot-v${{ env.RELEASE_VERSION }}.exe)**
-            - [SHA256 Checksum](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/autoloot-v${{ env.RELEASE_VERSION }}.exe.sha256)
+            - **[${{ env.RELEASE_EXE_FILE }}](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/${{ env.RELEASE_EXE_FILE }})**
+            - [SHA256 Checksum](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/${{ env.RELEASE_SHA_FILE }})
             
             ### Installation
-            1. Download the `autoloot-v${{ env.RELEASE_VERSION }}.exe` file
+            1. Download the `${{ env.RELEASE_EXE_FILE }}` file
             2. Run it directly (no installation required)
             3. Configure keys using `Ctrl+Alt+Shift+Key`
             
@@ -533,8 +533,8 @@ jobs:
             - 🖥️ On-screen display
             - 💾 Configuration persistence
           files: |
-            autoloot-v${{ env.RELEASE_VERSION }}.exe
-            autoloot-v${{ env.RELEASE_VERSION }}.exe.sha256
+            ${{ env.RELEASE_EXE_FILE }}
+            ${{ env.RELEASE_SHA_FILE }}
           token: ${{ secrets.GITHUB_TOKEN }}
           draft: false
           fail_on_unmatched_files: true

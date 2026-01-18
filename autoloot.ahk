@@ -144,7 +144,7 @@ ToggleKeyMacro(keyName, *) {
     if (ActiveKeys.Has(keyName)) {
         ; --- 关闭逻辑 ---
         StopKey(keyName)
-        IniDelete IniFileName, "ActiveKeys", keyName ; 从文件删除
+        DeleteKeyConfig(keyName) ; 从文件删除
         SoundBeep(750, 100)
     } else {
         ; --- 开启逻辑 ---
@@ -366,6 +366,19 @@ SaveKeyConfig(key, interval) {
         }
     } catch {
         ; 保存失败时不影响程序运行
+    }
+}
+
+DeleteKeyConfig(key) {
+    try {
+        key := StrLower(key)
+        IniDelete IniFileName, "ActiveKeys", key
+
+        global ConfigFileTime
+        try {
+            ConfigFileTime := FileGetTime(IniFileName, "M")
+        }
+    } catch {
     }
 }
 
