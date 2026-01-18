@@ -107,14 +107,26 @@ jobs:
                 $tempExtract = "$env:TEMP\AutoHotkey_Extract"
                 Expand-Archive -Path $fallbackZip -DestinationPath $tempExtract -Force
                 
-                # 查找 Aut2Exe.exe
-                $foundCompiler = Get-ChildItem -Path $tempExtract -Recurse -Filter "Aut2Exe.exe" | Select-Object -First 1
+                # 查找 Aut2Exe.exe（尝试多种可能的文件名）
+                $foundCompiler = $null
+                $possibleNames = @("Aut2Exe.exe", "Ahk2Exe.exe", "Aut2Exe64.exe", "Ahk2Exe64.exe")
+                
+                foreach ($name in $possibleNames) {
+                  $foundCompiler = Get-ChildItem -Path $tempExtract -Recurse -Filter $name -ErrorAction SilentlyContinue | Select-Object -First 1
+                  if ($foundCompiler) {
+                    Write-Host "Found compiler in AutoHotkey package: $($foundCompiler.FullName)"
+                    break
+                  }
+                }
+                
                 if ($foundCompiler) {
                   Copy-Item -Path $foundCompiler.FullName -Destination $aut2ExePath -Force
                   Write-Host "Compiler extracted successfully"
                   Write-Host "COMPILER_PATH=$compilerPath" >> $env:GITHUB_ENV
                   exit 0
                 } else {
+                  Write-Host "Listing all .exe files in AutoHotkey package:"
+                  Get-ChildItem -Path $tempExtract -Recurse -Filter "*.exe" | Select-Object FullName | ForEach-Object { Write-Host "  $($_.FullName)" }
                   throw "Aut2Exe.exe not found in AutoHotkey package"
                 }
               } else {
@@ -125,24 +137,34 @@ jobs:
             Write-Host "Extracting compiler..."
             Expand-Archive -Path $compilerZip -DestinationPath $compilerPath -Force
             
-            # 验证编译器是否存在（可能在子目录中）
-            if (-not (Test-Path $aut2ExePath)) {
-              # 尝试在解压后的目录中查找
-              $foundCompiler = Get-ChildItem -Path $compilerPath -Recurse -Filter "Aut2Exe.exe" | Select-Object -First 1
+            # 列出解压后的所有文件（调试信息）
+            Write-Host "Listing all extracted files:"
+            Get-ChildItem -Path $compilerPath -Recurse | Select-Object FullName, Name | ForEach-Object { 
+              Write-Host "  $($_.FullName)"
+            }
+            
+            # 查找 Aut2Exe.exe（尝试多种可能的文件名）
+            $foundCompiler = $null
+            $possibleNames = @("Aut2Exe.exe", "Ahk2Exe.exe", "Aut2Exe64.exe", "Ahk2Exe64.exe")
+            
+            foreach ($name in $possibleNames) {
+              $foundCompiler = Get-ChildItem -Path $compilerPath -Recurse -Filter $name -ErrorAction SilentlyContinue | Select-Object -First 1
               if ($foundCompiler) {
-                $compilerPath = $foundCompiler.DirectoryName
-                $aut2ExePath = $foundCompiler.FullName
-                Write-Host "Compiler found at: $compilerPath"
+                Write-Host "Found compiler: $($foundCompiler.FullName)"
+                break
               }
             }
             
-            if (Test-Path $aut2ExePath) {
-              Write-Host "Compiler downloaded and extracted successfully to: $compilerPath"
+            if ($foundCompiler) {
+              $compilerPath = $foundCompiler.DirectoryName
+              $aut2ExePath = $foundCompiler.FullName
+              Write-Host "Compiler found at: $compilerPath"
               Write-Host "COMPILER_PATH=$compilerPath" >> $env:GITHUB_ENV
             } else {
               Write-Error "Failed to find Aut2Exe.exe after download!"
-              Write-Host "Listing files in compiler directory:"
-              Get-ChildItem -Path $compilerPath -Recurse | Select-Object FullName | ForEach-Object { Write-Host $_.FullName }
+              Write-Host "Searched for: $($possibleNames -join ', ')"
+              Write-Host "Listing all .exe files in compiler directory:"
+              Get-ChildItem -Path $compilerPath -Recurse -Filter "*.exe" | Select-Object FullName | ForEach-Object { Write-Host "  $($_.FullName)" }
               exit 1
             }
           }
