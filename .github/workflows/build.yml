@@ -532,8 +532,9 @@ jobs:
             - 🎛️ Real-time speed adjustment
             - 🖥️ On-screen display
             - 💾 Configuration persistence
-          files: ${{ env.RELEASE_EXE_FILE }}
-            ${{ env.RELEASE_SHA_FILE }}
+          files: |
+            autoloot-v${{ steps.prepare_release.outputs.version }}.exe
+            autoloot-v${{ steps.prepare_release.outputs.version }}.exe.sha256
           token: ${{ secrets.GITHUB_TOKEN }}
           draft: false
           fail_on_unmatched_files: true
