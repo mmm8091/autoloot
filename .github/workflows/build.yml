@@ -63,6 +63,8 @@ jobs:
           
           if ($foundCompiler) {
             Write-Host "COMPILER_PATH=$compilerPath" >> $env:GITHUB_ENV
+            Write-Host "COMPILER_EXE=$foundCompiler" >> $env:GITHUB_ENV
+            Write-Host "Compiler setup complete: COMPILER_PATH=$compilerPath"
           } else {
             # 如果找不到，从 GitHub 下载编译器
             Write-Host "Compiler not found in repository, downloading from GitHub..."
@@ -193,14 +195,42 @@ jobs:
           
           $outputPath = "${{ github.workspace }}\$outputName.exe"
           
-          # 查找编译器（Ahk2Exe.exe 或 Aut2Exe.exe）
-          $compilerExe = "$env:COMPILER_PATH\Ahk2Exe.exe"
-          if (-not (Test-Path $compilerExe)) {
-            $compilerExe = "$env:COMPILER_PATH\Aut2Exe.exe"
+          # 检查环境变量是否设置
+          Write-Host "COMPILER_PATH environment variable: $env:COMPILER_PATH"
+          Write-Host "COMPILER_EXE environment variable: $env:COMPILER_EXE"
+          
+          # 如果 COMPILER_EXE 已经设置，直接使用
+          if ($env:COMPILER_EXE -and (Test-Path $env:COMPILER_EXE)) {
+            $compilerExe = $env:COMPILER_EXE
+            Write-Host "Using compiler from COMPILER_EXE: $compilerExe"
+          } elseif ($env:COMPILER_PATH) {
+            # 否则尝试从 COMPILER_PATH 查找
+            $compilerExe = "$env:COMPILER_PATH\Ahk2Exe.exe"
+            if (-not (Test-Path $compilerExe)) {
+              $compilerExe = "$env:COMPILER_PATH\Aut2Exe.exe"
+            }
+          } else {
+            # 如果都没有设置，尝试从仓库中查找
+            $ahkRepoPath = "${{ github.workspace }}\AutoHotkey_2.0.19"
+            $compilerPath = "$ahkRepoPath\Compiler"
+            $compilerExe = "$compilerPath\Ahk2Exe.exe"
+            if (-not (Test-Path $compilerExe)) {
+              $compilerExe = "$compilerPath\Aut2Exe.exe"
+            }
+            Write-Host "Trying to find compiler in repository: $compilerExe"
           }
           
           if (-not (Test-Path $compilerExe)) {
-            Write-Error "Compiler executable not found in $env:COMPILER_PATH"
+            Write-Error "Compiler executable not found!"
+            Write-Host "Searched paths:"
+            Write-Host "  COMPILER_EXE: $env:COMPILER_EXE"
+            Write-Host "  COMPILER_PATH\Ahk2Exe.exe: $env:COMPILER_PATH\Ahk2Exe.exe"
+            Write-Host "  COMPILER_PATH\Aut2Exe.exe: $env:COMPILER_PATH\Aut2Exe.exe"
+            Write-Host "Checking repository for compiler..."
+            $ahkRepoPath = "${{ github.workspace }}\AutoHotkey_2.0.19"
+            Get-ChildItem -Path "$ahkRepoPath\Compiler" -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "  Found: $($_.FullName)"
+            }
             exit 1
           }
           
