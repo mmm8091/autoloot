@@ -253,22 +253,25 @@ jobs:
           $scriptPath = "${{ github.workspace }}\autoloot.ahk"
           $outputName = "autoloot"
           
-          # 获取版本号（从步骤输出）
-          $version = "${{ steps.version.outputs.version }}"
+          # 直接从 ref 提取版本号（不依赖步骤输出）
           $isTagRef = "${{ github.ref }}"
+          $tagName = "${{ github.ref_name }}"
           
           Write-Host "Git ref: $isTagRef"
-          Write-Host "Version from step: '$version'"
+          Write-Host "Tag name: $tagName"
           
           # 如果是 tag 发布，使用版本号命名
-          if ($isTagRef -like "refs/tags/v*" -and $version -ne "") {
-            $outputName = "autoloot-v$version"
-            Write-Host "Building release version: $outputName.exe (version: $version)"
+          if ($isTagRef -like "refs/tags/v*") {
+            # 从 tag 名称提取版本号（去掉 v 前缀）
+            $version = $tagName -replace '^v', ''
+            if ($version) {
+              $outputName = "autoloot-v$version"
+              Write-Host "Building release version: $outputName.exe (version: $version)"
+            } else {
+              Write-Host "Building development version: $outputName.exe (tag name: $tagName)"
+            }
           } else {
             Write-Host "Building development version: $outputName.exe"
-            if ($version -ne "") {
-              Write-Host "Note: Version '$version' detected but ref is '$isTagRef'"
-            }
           }
           
           $outputPath = "${{ github.workspace }}\$outputName.exe"
