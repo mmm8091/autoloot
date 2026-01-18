@@ -460,7 +460,6 @@ jobs:
             autoloot-v${{ steps.version.outputs.version }}.exe.sha256
           token: ${{ secrets.GITHUB_TOKEN }}
           draft: false
-          make_latest: false
           fail_on_unmatched_files: false
       
       - name: Upload artifact (manual build)
