@@ -46,49 +46,41 @@ jobs:
           
           Write-Host "Using AutoHotkey from repository: $ahkRepoPath"
           
-          # 查找 Aut2Exe.exe（可能在 Compiler 子目录中，或者需要安装）
+          # 查找 Aut2Exe.exe（可能在 Compiler 子目录中）
           $compilerPath = "$ahkRepoPath\Compiler"
           $aut2ExePath = "$compilerPath\Aut2Exe.exe"
           
-          # 如果 Compiler 目录不存在，尝试运行安装脚本下载编译器
-          if (-not (Test-Path $compilerPath)) {
-            Write-Host "Compiler directory not found, attempting to install Ahk2Exe..."
-            
-            # 使用 AutoHotkey 运行安装脚本
-            $installScript = "$ahkRepoPath\UX\install-ahk2exe.ahk"
-            if (Test-Path $installScript) {
-              $ahkExe = "$ahkRepoPath\AutoHotkey64.exe"
-              if (Test-Path $ahkExe) {
-                # 静默运行安装脚本（需要管理员权限或用户安装）
-                Write-Host "Running Ahk2Exe installer..."
-                Start-Process -FilePath $ahkExe -ArgumentList "`"$installScript`"", "-Y" -Wait -NoNewWindow
-                
-                # 等待一下让安装完成
-                Start-Sleep -Seconds 3
-              }
-            }
-          }
-          
-          # 再次检查编译器是否存在
+          # 检查编译器是否已存在于仓库中
           if (Test-Path $aut2ExePath) {
             Write-Host "Compiler found at: $compilerPath"
             Write-Host "COMPILER_PATH=$compilerPath" >> $env:GITHUB_ENV
           } else {
-            # 如果还是找不到，尝试从 GitHub 下载编译器
-            Write-Host "Compiler not found, downloading from GitHub..."
+            # 如果找不到，直接从 GitHub 下载编译器（跳过运行安装脚本，因为在 CI 环境中可能不兼容）
+            Write-Host "Compiler not found in repository, downloading from GitHub..."
+            
+            # 创建 Compiler 目录
+            if (-not (Test-Path $compilerPath)) {
+              New-Item -ItemType Directory -Path $compilerPath -Force | Out-Null
+            }
             
             # 下载编译器 ZIP 文件
             $compilerUrl = "https://github.com/AutoHotkey/Ahk2Exe/releases/latest/download/Ahk2Exe.zip"
             $compilerZip = "$env:TEMP\Ahk2Exe.zip"
             
+            Write-Host "Downloading compiler from: $compilerUrl"
             Invoke-WebRequest -Uri $compilerUrl -OutFile $compilerZip
+            
+            Write-Host "Extracting compiler..."
             Expand-Archive -Path $compilerZip -DestinationPath $compilerPath -Force
             
+            # 验证编译器是否存在
             if (Test-Path $aut2ExePath) {
-              Write-Host "Compiler downloaded and extracted successfully"
+              Write-Host "Compiler downloaded and extracted successfully to: $compilerPath"
               Write-Host "COMPILER_PATH=$compilerPath" >> $env:GITHUB_ENV
             } else {
-              Write-Error "Failed to find or download Aut2Exe.exe!"
+              Write-Error "Failed to find Aut2Exe.exe after download!"
+              Write-Host "Listing files in compiler directory:"
+              Get-ChildItem -Path $compilerPath -Recurse | Select-Object FullName | ForEach-Object { Write-Host $_.FullName }
               exit 1
             }
           }
