@@ -12,6 +12,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
     
     steps:
       - name: Checkout code
@@ -454,10 +456,12 @@ jobs:
             - 🖥️ On-screen display
             - 💾 Configuration persistence
           files: |
-            ${{ env.OUTPUT_EXE }}
-            ${{ env.OUTPUT_EXE }}.sha256
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            autoloot-v${{ steps.version.outputs.version }}.exe
+            autoloot-v${{ steps.version.outputs.version }}.exe.sha256
+          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: false
+          make_latest: false
+          fail_on_unmatched_files: false
       
       - name: Upload artifact (manual build)
         if: github.event_name == 'workflow_dispatch'
