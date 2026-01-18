@@ -46,13 +46,22 @@ jobs:
           
           Write-Host "Using AutoHotkey from repository: $ahkRepoPath"
           
-          # 查找 Aut2Exe.exe（可能在 Compiler 子目录中）
+          # 查找编译器（Ahk2Exe.exe 或 Aut2Exe.exe，可能在 Compiler 子目录中）
           $compilerPath = "$ahkRepoPath\Compiler"
+          $ahk2ExePath = "$compilerPath\Ahk2Exe.exe"
           $aut2ExePath = "$compilerPath\Aut2Exe.exe"
           
-          # 检查编译器是否已存在于仓库中
-          if (Test-Path $aut2ExePath) {
-            Write-Host "Compiler found at: $compilerPath"
+          # 检查编译器是否已存在于仓库中（优先查找 Ahk2Exe.exe，然后是 Aut2Exe.exe）
+          $foundCompiler = $null
+          if (Test-Path $ahk2ExePath) {
+            $foundCompiler = $ahk2ExePath
+            Write-Host "Compiler found at: $compilerPath (Ahk2Exe.exe)"
+          } elseif (Test-Path $aut2ExePath) {
+            $foundCompiler = $aut2ExePath
+            Write-Host "Compiler found at: $compilerPath (Aut2Exe.exe)"
+          }
+          
+          if ($foundCompiler) {
             Write-Host "COMPILER_PATH=$compilerPath" >> $env:GITHUB_ENV
           } else {
             # 如果找不到，从 GitHub 下载编译器
@@ -184,29 +193,49 @@ jobs:
           
           $outputPath = "${{ github.workspace }}\$outputName.exe"
           
+          # 查找编译器（Ahk2Exe.exe 或 Aut2Exe.exe）
+          $compilerExe = "$env:COMPILER_PATH\Ahk2Exe.exe"
+          if (-not (Test-Path $compilerExe)) {
+            $compilerExe = "$env:COMPILER_PATH\Aut2Exe.exe"
+          }
+          
+          if (-not (Test-Path $compilerExe)) {
+            Write-Error "Compiler executable not found in $env:COMPILER_PATH"
+            exit 1
+          }
+          
+          Write-Host "Using compiler: $compilerExe"
+          
           # 查找 AutoHotkey 64位 bin 文件（用于编译）
-          $binFile = Get-ChildItem -Path "$env:COMPILER_PATH" -Recurse -Filter "AutoHotkey*.bin" | Where-Object { $_.Name -like "*64*" -or $_.Name -like "*U64*" } | Select-Object -First 1
+          $ahkBinPath = "${{ github.workspace }}\AutoHotkey_2.0.19"
+          $binFile = Get-ChildItem -Path $ahkBinPath -Recurse -Filter "AutoHotkey*.bin" | Where-Object { $_.Name -like "*64*" -or $_.Name -like "*U64*" } | Select-Object -First 1
           
           if (-not $binFile) {
             Write-Warning "64-bit bin file not found, trying default..."
-            $binFile = Get-ChildItem -Path "$env:COMPILER_PATH" -Recurse -Filter "*.bin" | Select-Object -First 1
+            $binFile = Get-ChildItem -Path $ahkBinPath -Recurse -Filter "*.bin" | Select-Object -First 1
           }
           
           if ($binFile) {
             Write-Host "Using bin file: $($binFile.FullName)"
           }
           
-          # 使用 Aut2Exe 编译（64位）
+          # 使用编译器编译（64位）
           # /in: 输入脚本文件
           # /out: 输出 exe 文件
           # /bin: 指定 bin 文件路径（64位）
           Write-Host "Compiling script to exe..."
           
           if ($binFile) {
-            & "$env:COMPILER_PATH\Aut2Exe.exe" /in "$scriptPath" /out "$outputPath" /bin "$($binFile.FullName)"
+            & $compilerExe /in "$scriptPath" /out "$outputPath" /bin "$($binFile.FullName)"
           } else {
             # 如果不指定 bin，使用默认（通常是64位）
-            & "$env:COMPILER_PATH\Aut2Exe.exe" /in "$scriptPath" /out "$outputPath"
+            # 需要指定 AutoHotkey 64位 exe 作为 base
+            $ahk64Exe = "$ahkBinPath\AutoHotkey64.exe"
+            if (Test-Path $ahk64Exe) {
+              & $compilerExe /in "$scriptPath" /out "$outputPath" /bin "$ahk64Exe"
+            } else {
+              & $compilerExe /in "$scriptPath" /out "$outputPath"
+            }
           }
           
           if (Test-Path $outputPath) {
