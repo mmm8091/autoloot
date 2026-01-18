@@ -352,10 +352,10 @@ jobs:
             }
             
             if (Test-Path "$env:TEMP\compiler_error.txt") {
-              $error = Get-Content "$env:TEMP\compiler_error.txt" -Raw
-              if ($error) {
+              $compilerError = Get-Content "$env:TEMP\compiler_error.txt" -Raw
+              if ($compilerError) {
                 Write-Host "Compiler errors:"
-                Write-Host $error
+                Write-Host $compilerError
               }
             }
             
