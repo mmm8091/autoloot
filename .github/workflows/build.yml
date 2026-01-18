@@ -34,39 +34,63 @@ jobs:
           }
           Write-Host "is_prerelease=$isPrerelease" >> $env:GITHUB_OUTPUT
       
-      - name: Download AutoHotkey v2 compiler
+      - name: Setup AutoHotkey v2 compiler from repository
         run: |
-          # 获取 AutoHotkey v2 最新版本的下载链接
-          Write-Host "Fetching latest AutoHotkey v2 release..."
-          $latestRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/AutoHotkey/AutoHotkey/releases/latest"
+          # 使用代码库中的 AutoHotkey（已通过 Git LFS 下载）
+          $ahkRepoPath = "${{ github.workspace }}\AutoHotkey_2.0.19"
           
-          # 查找包含编译器的 ZIP 文件（通常命名为 AutoHotkey_*.zip）
-          $zipAsset = $latestRelease.assets | Where-Object { $_.name -like "AutoHotkey_*.zip" } | Select-Object -First 1
-          
-          if (-not $zipAsset) {
-            Write-Error "Could not find AutoHotkey ZIP file in latest release"
+          if (-not (Test-Path $ahkRepoPath)) {
+            Write-Error "AutoHotkey_2.0.19 directory not found in repository!"
             exit 1
           }
           
-          $downloadUrl = $zipAsset.browser_download_url
-          $zipPath = "$env:TEMP\AutoHotkey.zip"
-          $extractPath = "$env:TEMP\AutoHotkey"
+          Write-Host "Using AutoHotkey from repository: $ahkRepoPath"
           
-          Write-Host "Downloading AutoHotkey v2 compiler from: $downloadUrl"
-          Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath
+          # 查找 Aut2Exe.exe（可能在 Compiler 子目录中，或者需要安装）
+          $compilerPath = "$ahkRepoPath\Compiler"
+          $aut2ExePath = "$compilerPath\Aut2Exe.exe"
           
-          Write-Host "Extracting AutoHotkey..."
-          Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+          # 如果 Compiler 目录不存在，尝试运行安装脚本下载编译器
+          if (-not (Test-Path $compilerPath)) {
+            Write-Host "Compiler directory not found, attempting to install Ahk2Exe..."
+            
+            # 使用 AutoHotkey 运行安装脚本
+            $installScript = "$ahkRepoPath\UX\install-ahk2exe.ahk"
+            if (Test-Path $installScript) {
+              $ahkExe = "$ahkRepoPath\AutoHotkey64.exe"
+              if (Test-Path $ahkExe) {
+                # 静默运行安装脚本（需要管理员权限或用户安装）
+                Write-Host "Running Ahk2Exe installer..."
+                Start-Process -FilePath $ahkExe -ArgumentList "`"$installScript`"", "-Y" -Wait -NoNewWindow
+                
+                # 等待一下让安装完成
+                Start-Sleep -Seconds 3
+              }
+            }
+          }
           
-          # 查找 Aut2Exe.exe（可能在根目录或 Compiler 子目录）
-          $ahkPath = Get-ChildItem -Path $extractPath -Recurse -Filter "Aut2Exe.exe" | Select-Object -First 1
-          if ($ahkPath) {
-            $compilerPath = $ahkPath.DirectoryName
+          # 再次检查编译器是否存在
+          if (Test-Path $aut2ExePath) {
             Write-Host "Compiler found at: $compilerPath"
             Write-Host "COMPILER_PATH=$compilerPath" >> $env:GITHUB_ENV
           } else {
-            Write-Error "Aut2Exe.exe not found in extracted files!"
-            exit 1
+            # 如果还是找不到，尝试从 GitHub 下载编译器
+            Write-Host "Compiler not found, downloading from GitHub..."
+            
+            # 下载编译器 ZIP 文件
+            $compilerUrl = "https://github.com/AutoHotkey/Ahk2Exe/releases/latest/download/Ahk2Exe.zip"
+            $compilerZip = "$env:TEMP\Ahk2Exe.zip"
+            
+            Invoke-WebRequest -Uri $compilerUrl -OutFile $compilerZip
+            Expand-Archive -Path $compilerZip -DestinationPath $compilerPath -Force
+            
+            if (Test-Path $aut2ExePath) {
+              Write-Host "Compiler downloaded and extracted successfully"
+              Write-Host "COMPILER_PATH=$compilerPath" >> $env:GITHUB_ENV
+            } else {
+              Write-Error "Failed to find or download Aut2Exe.exe!"
+              exit 1
+            }
           }
       
       - name: Compile script to exe (64-bit)

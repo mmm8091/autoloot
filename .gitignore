@@ -9,3 +9,6 @@ config.ini
 # Windows 系统文件
 Thumbs.db
 Desktop.ini
+
+# AutoHotkey 源 ZIP 文件（大文件，已在 LFS 中）
+# AutoHotkey_2.0.19/AutoHotkey_2.0.19.zip
