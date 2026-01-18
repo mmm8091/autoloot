@@ -408,13 +408,22 @@ jobs:
           # 从环境变量或默认值获取输出文件名
           $outputFileName = $env:OUTPUT_EXE
           if (-not $outputFileName) {
-            # 如果没有设置，根据是否是 tag 构建来确定
-            if ("${{ steps.version.outputs.version }}" -ne "") {
-              $outputFileName = "autoloot-v${{ steps.version.outputs.version }}.exe"
+            # 如果没有设置，检查工作区中的 exe 文件
+            $isTagBuild = "${{ github.ref }}" -like "refs/tags/v*"
+            $version = "${{ steps.version.outputs.version }}"
+            
+            if ($isTagBuild -and $version -ne "") {
+              $outputFileName = "autoloot-v$version.exe"
             } else {
-              $outputFileName = "autoloot.exe"
+              # 查找工作区中的 exe 文件
+              $foundExe = Get-ChildItem -Path "${{ github.workspace }}" -Filter "autoloot*.exe" | Select-Object -First 1
+              if ($foundExe) {
+                $outputFileName = $foundExe.Name
+              } else {
+                $outputFileName = "autoloot.exe"
+              }
             }
-            Write-Host "OUTPUT_EXE not set, using default: $outputFileName"
+            Write-Host "OUTPUT_EXE not set, using: $outputFileName"
           }
           
           $exePath = "${{ github.workspace }}\$outputFileName"
@@ -439,24 +448,72 @@ jobs:
           Write-Host "Checksum generated: $checksum"
           Write-Host "OUTPUT_EXE=$outputFileName" >> $env:GITHUB_ENV
       
+      - name: Prepare Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: prepare_release
+        run: |
+          # 从 tag 提取版本号（去掉 v 前缀）
+          $tagName = "${{ github.ref_name }}"
+          $version = $tagName -replace '^v', ''
+          Write-Host "Release version: $version"
+          Write-Host "version=$version" >> $env:GITHUB_OUTPUT
+          
+          # 检测是否为预发布版本
+          $isPrerelease = "false"
+          if ($version -match '(?i)(alpha|beta|rc|pre)') {
+            $isPrerelease = "true"
+            Write-Host "This is a prerelease version"
+          }
+          Write-Host "is_prerelease=$isPrerelease" >> $env:GITHUB_OUTPUT
+          
+          # 检查文件是否存在
+          $exeFile = "autoloot-v$version.exe"
+          $shaFile = "$exeFile.sha256"
+          $exePath = "${{ github.workspace }}\$exeFile"
+          $shaPath = "${{ github.workspace }}\$shaFile"
+          
+          Write-Host "Checking for files:"
+          Write-Host "  EXE: $exePath"
+          Write-Host "  SHA: $shaPath"
+          
+          if (-not (Test-Path $exePath)) {
+            Write-Error "Executable file not found: $exePath"
+            Write-Host "Available .exe files in workspace:"
+            Get-ChildItem -Path "${{ github.workspace }}" -Filter "*.exe" | ForEach-Object {
+              Write-Host "  - $($_.Name) ($([math]::Round($_.Length / 1KB, 2)) KB)"
+            }
+            exit 1
+          }
+          
+          if (-not (Test-Path $shaPath)) {
+            Write-Error "Checksum file not found: $shaPath"
+            Write-Host "Available .sha256 files in workspace:"
+            Get-ChildItem -Path "${{ github.workspace }}" -Filter "*.sha256" | ForEach-Object {
+              Write-Host "  - $($_.Name)"
+            }
+            exit 1
+          }
+          
+          Write-Host "✓ Files verified successfully: $exeFile and $shaFile"
+      
       - name: Create GitHub Release (tag only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
-          name: Release ${{ steps.version.outputs.version }}
-          prerelease: ${{ steps.version.outputs.is_prerelease == 'true' }}
+          name: Release ${{ steps.prepare_release.outputs.version }}
+          prerelease: ${{ steps.prepare_release.outputs.is_prerelease == 'true' }}
           body: |
-            ## AutoLoot ${{ steps.version.outputs.version }}
+            ## AutoLoot ${{ steps.prepare_release.outputs.version }}
             
-            ${{ steps.version.outputs.is_prerelease == 'true' && '⚠️ **This is a prerelease version**' || '' }}
+            ${{ steps.prepare_release.outputs.is_prerelease == 'true' && '⚠️ **This is a prerelease version**' || '' }}
             
             ### Downloads
-            - **[autoloot-v${{ steps.version.outputs.version }}.exe](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/autoloot-v${{ steps.version.outputs.version }}.exe)**
-            - [SHA256 Checksum](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/autoloot-v${{ steps.version.outputs.version }}.exe.sha256)
+            - **[autoloot-v${{ steps.prepare_release.outputs.version }}.exe](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/autoloot-v${{ steps.prepare_release.outputs.version }}.exe)**
+            - [SHA256 Checksum](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/autoloot-v${{ steps.prepare_release.outputs.version }}.exe.sha256)
             
             ### Installation
-            1. Download the `autoloot-v${{ steps.version.outputs.version }}.exe` file
+            1. Download the `autoloot-v${{ steps.prepare_release.outputs.version }}.exe` file
             2. Run it directly (no installation required)
             3. Configure keys using `Ctrl+Alt+Shift+Key`
             
@@ -467,8 +524,8 @@ jobs:
             - 🖥️ On-screen display
             - 💾 Configuration persistence
           files: |
-            autoloot-v${{ steps.version.outputs.version }}.exe
-            autoloot-v${{ steps.version.outputs.version }}.exe.sha256
+            autoloot-v${{ steps.prepare_release.outputs.version }}.exe
+            autoloot-v${{ steps.prepare_release.outputs.version }}.exe.sha256
           token: ${{ secrets.GITHUB_TOKEN }}
           draft: false
           fail_on_unmatched_files: true
