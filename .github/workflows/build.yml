@@ -45,7 +45,7 @@ jobs:
           # --- AutoHotkey ---
           $ahkZip = Join-Path $toolsRoot "AutoHotkey_$ahkVersion.zip"
           $ahkUrl = "https://github.com/AutoHotkey/AutoHotkey/releases/download/v$ahkVersion/AutoHotkey_$ahkVersion.zip"
-          Write-Host "Downloading AutoHotkey v$ahkVersion: $ahkUrl"
+          Write-Host "Downloading AutoHotkey v${ahkVersion}: $ahkUrl"
           Invoke-WebRequest -Uri $ahkUrl -OutFile $ahkZip -ErrorAction Stop
 
           $ahkExtract = Join-Path $toolsRoot "AutoHotkey_$ahkVersion"
