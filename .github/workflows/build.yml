@@ -39,6 +39,7 @@ jobs:
       - name: Setup AutoHotkey & Ahk2Exe (download)
         run: |
           $ahkVersion = "2.0.19"
+          $headers = @{ "User-Agent" = "autoloot-ci" }
           $toolsRoot = Join-Path $env:RUNNER_TEMP "autoloot-tools"
           New-Item -ItemType Directory -Force -Path $toolsRoot | Out-Null
 
@@ -46,7 +47,7 @@ jobs:
           $ahkZip = Join-Path $toolsRoot "AutoHotkey_$ahkVersion.zip"
           $ahkUrl = "https://github.com/AutoHotkey/AutoHotkey/releases/download/v$ahkVersion/AutoHotkey_$ahkVersion.zip"
           Write-Host "Downloading AutoHotkey v${ahkVersion}: $ahkUrl"
-          Invoke-WebRequest -Uri $ahkUrl -OutFile $ahkZip -ErrorAction Stop
+          Invoke-WebRequest -Uri $ahkUrl -OutFile $ahkZip -Headers $headers -ErrorAction Stop
 
           $ahkExtract = Join-Path $toolsRoot "AutoHotkey_$ahkVersion"
           if (Test-Path $ahkExtract) { Remove-Item -Recurse -Force $ahkExtract }
@@ -64,10 +65,17 @@ jobs:
           Write-Host "AHK_DIR=$ahkDir"
 
           # --- Ahk2Exe ---
+          # Ahk2Exe 的 release tag 命名与 AutoHotkey 版本不一致，因此使用 latest release 的 zip asset。
           $ahk2ExeZip = Join-Path $toolsRoot "Ahk2Exe.zip"
-          $ahk2ExeUrl = "https://github.com/AutoHotkey/Ahk2Exe/releases/download/v$ahkVersion/Ahk2Exe.zip"
+          $latest = Invoke-RestMethod -Uri "https://api.github.com/repos/AutoHotkey/Ahk2Exe/releases/latest" -Headers $headers -ErrorAction Stop
+          $asset = $latest.assets | Where-Object { $_.name -match '\.zip$' } | Select-Object -First 1
+          if (-not $asset) {
+            Write-Error "No .zip asset found in AutoHotkey/Ahk2Exe latest release"
+            exit 1
+          }
+          $ahk2ExeUrl = $asset.browser_download_url
           Write-Host "Downloading Ahk2Exe: $ahk2ExeUrl"
-          Invoke-WebRequest -Uri $ahk2ExeUrl -OutFile $ahk2ExeZip -ErrorAction Stop
+          Invoke-WebRequest -Uri $ahk2ExeUrl -OutFile $ahk2ExeZip -Headers $headers -ErrorAction Stop
 
           $compilerExtract = Join-Path $toolsRoot "Ahk2Exe"
           if (Test-Path $compilerExtract) { Remove-Item -Recurse -Force $compilerExtract }
