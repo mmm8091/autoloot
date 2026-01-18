@@ -55,7 +55,7 @@ jobs:
             Write-Host "Compiler found at: $compilerPath"
             Write-Host "COMPILER_PATH=$compilerPath" >> $env:GITHUB_ENV
           } else {
-            # 如果找不到，直接从 GitHub 下载编译器（跳过运行安装脚本，因为在 CI 环境中可能不兼容）
+            # 如果找不到，从 GitHub 下载编译器
             Write-Host "Compiler not found in repository, downloading from GitHub..."
             
             # 创建 Compiler 目录
@@ -63,17 +63,79 @@ jobs:
               New-Item -ItemType Directory -Path $compilerPath -Force | Out-Null
             }
             
-            # 下载编译器 ZIP 文件
-            $compilerUrl = "https://github.com/AutoHotkey/Ahk2Exe/releases/latest/download/Ahk2Exe.zip"
+            # 尝试从 Ahk2Exe 仓库获取最新 release 的 asset
+            try {
+              Write-Host "Fetching latest Ahk2Exe release from GitHub API..."
+              $latestRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/AutoHotkey/Ahk2Exe/releases/latest" -ErrorAction Stop
+              
+              # 查找 ZIP 或压缩包 asset
+              $compilerAsset = $latestRelease.assets | Where-Object { 
+                $_.name -like "*.zip" -or $_.name -like "*Ahk2Exe*" 
+              } | Select-Object -First 1
+              
+              if ($compilerAsset) {
+                $compilerUrl = $compilerAsset.browser_download_url
+                Write-Host "Found compiler asset: $($compilerAsset.name)"
+              } else {
+                throw "No ZIP asset found in latest release"
+              }
+            } catch {
+              # 如果 API 失败，尝试使用固定的下载链接（从 v2.0.19 对应的版本）
+              Write-Host "Failed to fetch from API, using fallback URL..."
+              $compilerUrl = "https://github.com/AutoHotkey/Ahk2Exe/releases/download/v2.0.19/Ahk2Exe.zip"
+            }
+            
             $compilerZip = "$env:TEMP\Ahk2Exe.zip"
             
             Write-Host "Downloading compiler from: $compilerUrl"
-            Invoke-WebRequest -Uri $compilerUrl -OutFile $compilerZip
+            try {
+              Invoke-WebRequest -Uri $compilerUrl -OutFile $compilerZip -ErrorAction Stop
+            } catch {
+              Write-Error "Failed to download compiler: $_"
+              Write-Host "Trying alternative: downloading from AutoHotkey release..."
+              
+              # 备用方案：从 AutoHotkey 主仓库下载完整版本（可能包含编译器）
+              $ahkRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/AutoHotkey/AutoHotkey/releases/tags/v2.0.19"
+              $ahkZipAsset = $ahkRelease.assets | Where-Object { $_.name -like "AutoHotkey_2.0.19.zip" } | Select-Object -First 1
+              
+              if ($ahkZipAsset) {
+                $fallbackZip = "$env:TEMP\AutoHotkey_Full.zip"
+                Write-Host "Downloading full AutoHotkey package: $($ahkZipAsset.browser_download_url)"
+                Invoke-WebRequest -Uri $ahkZipAsset.browser_download_url -OutFile $fallbackZip
+                
+                # 解压并查找编译器
+                $tempExtract = "$env:TEMP\AutoHotkey_Extract"
+                Expand-Archive -Path $fallbackZip -DestinationPath $tempExtract -Force
+                
+                # 查找 Aut2Exe.exe
+                $foundCompiler = Get-ChildItem -Path $tempExtract -Recurse -Filter "Aut2Exe.exe" | Select-Object -First 1
+                if ($foundCompiler) {
+                  Copy-Item -Path $foundCompiler.FullName -Destination $aut2ExePath -Force
+                  Write-Host "Compiler extracted successfully"
+                  Write-Host "COMPILER_PATH=$compilerPath" >> $env:GITHUB_ENV
+                  exit 0
+                } else {
+                  throw "Aut2Exe.exe not found in AutoHotkey package"
+                }
+              } else {
+                throw "Cannot find compiler download URL"
+              }
+            }
             
             Write-Host "Extracting compiler..."
             Expand-Archive -Path $compilerZip -DestinationPath $compilerPath -Force
             
-            # 验证编译器是否存在
+            # 验证编译器是否存在（可能在子目录中）
+            if (-not (Test-Path $aut2ExePath)) {
+              # 尝试在解压后的目录中查找
+              $foundCompiler = Get-ChildItem -Path $compilerPath -Recurse -Filter "Aut2Exe.exe" | Select-Object -First 1
+              if ($foundCompiler) {
+                $compilerPath = $foundCompiler.DirectoryName
+                $aut2ExePath = $foundCompiler.FullName
+                Write-Host "Compiler found at: $compilerPath"
+              }
+            }
+            
             if (Test-Path $aut2ExePath) {
               Write-Host "Compiler downloaded and extracted successfully to: $compilerPath"
               Write-Host "COMPILER_PATH=$compilerPath" >> $env:GITHUB_ENV
